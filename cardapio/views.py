@@ -2,12 +2,13 @@
 views.py — Views de CRUD do cardápio (Categoria e ItemCardapio).
 
 Padrão adotado (conforme slides da disciplina):
-  - CategoriaListView    → GET /categorias/        (listar)   POST /categorias/      (criar)
-  - CategoriaDetailView  → GET /categorias/<id>/   (detalhe)  PUT /categorias/<id>/  (atualizar)  DELETE /categorias/<id>/ (apagar)
-  - ItemCardapioListView   → GET /itens/            (listar)   POST /itens/           (criar)
-  - ItemCardapioDetailView → GET /itens/<id>/       (detalhe)  PUT /itens/<id>/       (atualizar)  DELETE /itens/<id>/      (apagar)
+  - CategoriaListView    → GET /categorias/        (público)    POST /categorias/      (gerente)
+  - CategoriaDetailView  → GET /categorias/<id>/   (público)    PUT /categorias/<id>/  (gerente)  DELETE /categorias/<id>/ (gerente)
+  - ItemCardapioListView   → GET /itens/            (público)    POST /itens/           (gerente)
+  - ItemCardapioDetailView → GET /itens/<id>/       (público)    PUT /itens/<id>/       (gerente)  DELETE /itens/<id>/      (gerente)
 
-Todas as views herdam de APIView e retornam Response com status HTTP explícito.
+Leitura (GET) é pública — qualquer um pode consultar o cardápio sem autenticação.
+Escrita (POST, PUT, DELETE) exige token válido e perfil do tipo 'gerente'.
 """
 
 from rest_framework import status
@@ -18,24 +19,54 @@ from .models import Categoria, ItemCardapio
 from .serializers import CategoriaSerializer, ItemCardapioSerializer
 
 
+def _checar_gerente(request):
+    """
+    Verifica se o request vem de um usuário autenticado com perfil 'gerente'.
+    Retorna None se a verificação passar, ou uma Response de erro caso contrário:
+      401 — sem autenticação.
+      403 — autenticado, mas não é gerente.
+    """
+    if not request.user or not request.user.is_authenticated:
+        return Response(
+            {"erro": "Autenticação necessária. Envie o cabeçalho: Authorization: Token <seu_token>."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+    try:
+        tipo = request.user.perfil.tipo
+    except Exception:
+        return Response(
+            {"erro": "Perfil de usuário não encontrado."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if tipo != "gerente":
+        return Response(
+            {"erro": "Apenas gerentes podem criar, editar ou remover itens do cardápio."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return None
+
+
 # ── Categoria ─────────────────────────────────────────────────────────────────
 
 class CategoriaListView(APIView):
     """
-    Lista todas as categorias ou cria uma nova.
+    Lista todas as categorias (público) ou cria uma nova (gerente).
 
-    GET  → retorna lista de categorias ordenadas por nome.
-    POST → cria uma nova categoria; retorna 201 em caso de sucesso.
+    GET  → público; retorna lista de categorias ordenadas por nome.
+    POST → requer token de gerente; cria uma nova categoria; retorna 201.
     """
 
     def get(self, request):
-        """Retorna todas as categorias cadastradas."""
+        """Retorna todas as categorias cadastradas. Acesso público."""
         categorias = Categoria.objects.all()
         serializer = CategoriaSerializer(categorias, many=True)
         return Response(serializer.data)
 
     def post(self, request):
-        """Cria uma nova categoria com os dados enviados no corpo da requisição."""
+        """Cria uma nova categoria. Requer autenticação com perfil gerente."""
+        erro = _checar_gerente(request)
+        if erro:
+            return erro
         serializer = CategoriaSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -45,22 +76,22 @@ class CategoriaListView(APIView):
 
 class CategoriaDetailView(APIView):
     """
-    Recupera, atualiza ou remove uma categoria específica pelo id.
+    Recupera (público), atualiza ou remove uma categoria (gerente).
 
-    GET    → retorna a categoria com o id informado.
-    PUT    → substitui todos os campos da categoria.
-    DELETE → remove a categoria (e em cascata seus itens do cardápio).
+    GET    → público; retorna a categoria com o id informado.
+    PUT    → requer token de gerente; substitui todos os campos da categoria.
+    DELETE → requer token de gerente; remove a categoria e seus itens em cascata.
     """
 
     def _get_object(self, pk):
-        """Auxiliar: busca a categoria ou retorna None."""
+        """Auxiliar: busca a categoria pelo pk ou retorna None."""
         try:
             return Categoria.objects.get(pk=pk)
         except Categoria.DoesNotExist:
             return None
 
     def get(self, request, pk):
-        """Retorna os dados de uma categoria pelo id."""
+        """Retorna os dados de uma categoria pelo id. Acesso público."""
         categoria = self._get_object(pk)
         if categoria is None:
             return Response({"erro": "Categoria não encontrada."}, status=status.HTTP_404_NOT_FOUND)
@@ -68,7 +99,10 @@ class CategoriaDetailView(APIView):
         return Response(serializer.data)
 
     def put(self, request, pk):
-        """Atualiza todos os campos de uma categoria pelo id."""
+        """Atualiza todos os campos de uma categoria. Requer autenticação com perfil gerente."""
+        erro = _checar_gerente(request)
+        if erro:
+            return erro
         categoria = self._get_object(pk)
         if categoria is None:
             return Response({"erro": "Categoria não encontrada."}, status=status.HTTP_404_NOT_FOUND)
@@ -79,7 +113,10 @@ class CategoriaDetailView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):
-        """Remove uma categoria pelo id."""
+        """Remove uma categoria pelo id. Requer autenticação com perfil gerente."""
+        erro = _checar_gerente(request)
+        if erro:
+            return erro
         categoria = self._get_object(pk)
         if categoria is None:
             return Response({"erro": "Categoria não encontrada."}, status=status.HTTP_404_NOT_FOUND)
@@ -91,15 +128,15 @@ class CategoriaDetailView(APIView):
 
 class ItemCardapioListView(APIView):
     """
-    Lista todos os itens do cardápio ou cria um novo.
+    Lista todos os itens do cardápio (público) ou cria um novo (gerente).
 
-    GET  → retorna lista de itens; aceita query param ?categoria=<id> para filtrar.
-    POST → cria um novo item; retorna 201 em caso de sucesso.
+    GET  → público; aceita query param ?categoria=<id> para filtrar por categoria.
+    POST → requer token de gerente; cria um novo item; retorna 201.
     """
 
     def get(self, request):
         """
-        Retorna todos os itens do cardápio.
+        Retorna todos os itens do cardápio. Acesso público.
         Aceita o parâmetro opcional ?categoria=<id> para filtrar por categoria.
         """
         itens = ItemCardapio.objects.all()
@@ -110,7 +147,10 @@ class ItemCardapioListView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        """Cria um novo item do cardápio com os dados enviados no corpo da requisição."""
+        """Cria um novo item do cardápio. Requer autenticação com perfil gerente."""
+        erro = _checar_gerente(request)
+        if erro:
+            return erro
         serializer = ItemCardapioSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -120,22 +160,22 @@ class ItemCardapioListView(APIView):
 
 class ItemCardapioDetailView(APIView):
     """
-    Recupera, atualiza ou remove um item do cardápio específico pelo id.
+    Recupera (público), atualiza ou remove um item do cardápio (gerente).
 
-    GET    → retorna o item com o id informado.
-    PUT    → substitui todos os campos do item.
-    DELETE → remove o item do cardápio.
+    GET    → público; retorna o item com o id informado.
+    PUT    → requer token de gerente; substitui todos os campos do item.
+    DELETE → requer token de gerente; remove o item do cardápio.
     """
 
     def _get_object(self, pk):
-        """Auxiliar: busca o item ou retorna None."""
+        """Auxiliar: busca o item pelo pk ou retorna None."""
         try:
             return ItemCardapio.objects.get(pk=pk)
         except ItemCardapio.DoesNotExist:
             return None
 
     def get(self, request, pk):
-        """Retorna os dados de um item do cardápio pelo id."""
+        """Retorna os dados de um item do cardápio pelo id. Acesso público."""
         item = self._get_object(pk)
         if item is None:
             return Response({"erro": "Item não encontrado."}, status=status.HTTP_404_NOT_FOUND)
@@ -143,7 +183,10 @@ class ItemCardapioDetailView(APIView):
         return Response(serializer.data)
 
     def put(self, request, pk):
-        """Atualiza todos os campos de um item do cardápio pelo id."""
+        """Atualiza todos os campos de um item do cardápio. Requer autenticação com perfil gerente."""
+        erro = _checar_gerente(request)
+        if erro:
+            return erro
         item = self._get_object(pk)
         if item is None:
             return Response({"erro": "Item não encontrado."}, status=status.HTTP_404_NOT_FOUND)
@@ -154,7 +197,10 @@ class ItemCardapioDetailView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):
-        """Remove um item do cardápio pelo id."""
+        """Remove um item do cardápio pelo id. Requer autenticação com perfil gerente."""
+        erro = _checar_gerente(request)
+        if erro:
+            return erro
         item = self._get_object(pk)
         if item is None:
             return Response({"erro": "Item não encontrado."}, status=status.HTTP_404_NOT_FOUND)

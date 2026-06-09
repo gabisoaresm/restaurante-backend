@@ -7,4 +7,5 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/cardapio/", include("cardapio.urls")),
     path("api/accounts/", include("accounts.urls")),
+    path("api/pedidos/", include("pedidos.urls")),
 ]
