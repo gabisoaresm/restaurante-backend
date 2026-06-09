@@ -5,12 +5,15 @@ Endpoints implementados:
   POST   /api/accounts/registro/     → cria User + Perfil, retorna dados do usuário (201)
   POST   /api/accounts/token-auth/   → valida credenciais, retorna token (200)
   DELETE /api/accounts/token-auth/   → invalida o token atual, realiza logout (200)
+  POST   /api/accounts/troca-senha/  → troca a senha do usuário autenticado e renova o token (200)
 """
 
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from rest_framework import status
+from rest_framework.authentication import TokenAuthentication
 from rest_framework.authtoken.models import Token
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -133,3 +136,69 @@ class CustomAuthToken(APIView):
         logout(request)
 
         return Response({"mensagem": "Logout realizado com sucesso."}, status=status.HTTP_200_OK)
+
+
+class TrocaSenhaView(APIView):
+    """
+    Troca a senha do usuário autenticado e renova o token de acesso.
+
+    Endpoint protegido: exige token válido no cabeçalho Authorization.
+
+    Fluxo:
+      1. Recebe old_password, new_password1 e new_password2 no corpo da requisição.
+      2. Verifica se old_password confere com a senha atual (check_password).
+         Se não conferir → 400 com mensagem de erro.
+      3. Verifica se new_password1 e new_password2 são iguais.
+         Se não forem → 400 com mensagem de erro.
+      4. Atualiza a senha com set_password e salva o usuário.
+      5. Apaga o token antigo e gera um novo (renovação obrigatória após troca de senha).
+      6. Retorna o novo token com HTTP 200.
+
+    A renovação do token garante que sessões antigas (com o token anterior)
+    sejam invalidadas imediatamente após a troca de senha.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        """Valida a senha atual, aplica a nova e retorna um token renovado."""
+        old_password = request.data.get("old_password", "")
+        new_password1 = request.data.get("new_password1", "")
+        new_password2 = request.data.get("new_password2", "")
+
+        if not old_password or not new_password1 or not new_password2:
+            return Response(
+                {"erro": "Os campos old_password, new_password1 e new_password2 são obrigatórios."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Verifica se a senha atual está correta
+        if not request.user.check_password(old_password):
+            return Response(
+                {"erro": "Senha atual incorreta."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Verifica se as duas novas senhas coincidem
+        if new_password1 != new_password2:
+            return Response(
+                {"erro": "As novas senhas não coincidem."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Aplica a nova senha e salva o usuário
+        request.user.set_password(new_password1)
+        request.user.save()
+
+        # Renova o token: apaga o antigo e gera um novo
+        Token.objects.filter(user=request.user).delete()
+        novo_token = Token.objects.create(user=request.user)
+
+        return Response(
+            {
+                "mensagem": "Senha alterada com sucesso.",
+                "token": novo_token.key,
+            },
+            status=status.HTTP_200_OK,
+        )
