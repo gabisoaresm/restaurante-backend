@@ -10,17 +10,28 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Carrega variáveis de ambiente do arquivo .env (apenas em desenvolvimento local).
+# Em produção (PythonAnywhere), as variáveis são configuradas diretamente no painel.
+if (BASE_DIR / ".env").exists():
+    load_dotenv(BASE_DIR / ".env")
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-h7#msyl+!st672kxa8(b991cq0$_3pzbex(3#xan%ig%ur+f@$"
+SECRET_KEY = os.environ.get(
+    "DJANGO_SECRET_KEY",
+    "django-insecure-h7#msyl+!st672kxa8(b991cq0$_3pzbex(3#xan%ig%ur+f@$",
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -136,3 +147,27 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.TokenAuthentication",
     ],
 }
+
+# ---------------------------------------------------------------------------
+# Configuração de e-mail
+# ---------------------------------------------------------------------------
+# EMAIL_BACKEND_TIPO controla o destino dos e-mails:
+#   'console' → imprime o e-mail no terminal (padrão para desenvolvimento)
+#   'gmail'   → envia e-mail real via Gmail SMTP (usar em produção)
+# ---------------------------------------------------------------------------
+_EMAIL_BACKEND_TIPO = os.environ.get("EMAIL_BACKEND_TIPO", "console")
+
+if _EMAIL_BACKEND_TIPO == "gmail":
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_HOST = "smtp.gmail.com"
+    EMAIL_PORT = 587
+    EMAIL_USE_TLS = True
+    EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+    EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+    DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+else:
+    # Desenvolvimento: e-mail aparece no terminal (sem envio real)
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+    EMAIL_HOST_USER = ""
+    EMAIL_HOST_PASSWORD = ""
+    DEFAULT_FROM_EMAIL = "noreply@restaurante.local"

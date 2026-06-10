@@ -3,4 +3,5 @@ djangorestframework
 django-cors-headers
 drf-yasg
 django-rest-passwordreset
+python-dotenv
 setuptools
