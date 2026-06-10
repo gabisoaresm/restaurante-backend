@@ -60,6 +60,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",  # deve vir antes de CommonMiddleware
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -147,6 +148,21 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.TokenAuthentication",
     ],
 }
+
+# ---------------------------------------------------------------------------
+# CORS — Cross-Origin Resource Sharing
+# ---------------------------------------------------------------------------
+# CORS_ALLOWED_ORIGINS lista as origens (domínios) autorizadas a fazer
+# requisições à API. O valor vem da variável de ambiente CORS_ALLOWED_ORIGINS,
+# que deve conter uma lista separada por vírgulas, sem espaços.
+#   Desenvolvimento local: http://localhost:8080,http://127.0.0.1:8080
+#   Produção: acrescente o domínio do frontend publicado no PythonAnywhere.
+# ---------------------------------------------------------------------------
+_cors_origins_env = os.environ.get(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:8080,http://127.0.0.1:8080",
+)
+CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
 
 # ---------------------------------------------------------------------------
 # Configuração de e-mail
