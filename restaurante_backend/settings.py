@@ -150,13 +150,13 @@ REST_FRAMEWORK = {
 }
 
 # ---------------------------------------------------------------------------
-# CORS — Cross-Origin Resource Sharing
+# CORS 
 # ---------------------------------------------------------------------------
 # CORS_ALLOWED_ORIGINS lista as origens (domínios) autorizadas a fazer
 # requisições à API. O valor vem da variável de ambiente CORS_ALLOWED_ORIGINS,
 # que deve conter uma lista separada por vírgulas, sem espaços.
 #   Desenvolvimento local: http://localhost:8080,http://127.0.0.1:8080
-#   Produção: acrescente o domínio do frontend publicado no PythonAnywhere.
+#   Produção: acrescentar o domínio do frontend publicado no PythonAnywhere.
 # ---------------------------------------------------------------------------
 _cors_origins_env = os.environ.get(
     "CORS_ALLOWED_ORIGINS",

@@ -6,6 +6,7 @@ Endpoints implementados:
   POST   /api/accounts/token-auth/   → valida credenciais, retorna token (200)
   DELETE /api/accounts/token-auth/   → invalida o token atual, realiza logout (200)
   POST   /api/accounts/troca-senha/  → troca a senha do usuário autenticado e renova o token (200)
+  GET    /api/accounts/me/           → retorna dados do usuário autenticado, incluindo tipo do perfil (200)
 
 Recuperação de senha esquecida (django-rest-passwordreset):
   POST   /api/accounts/password_reset/          → solicita token de redefinição por e-mail
@@ -331,6 +332,69 @@ class TrocaSenhaView(APIView):
             {
                 "mensagem": "Senha alterada com sucesso.",
                 "token": novo_token.key,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class UsuarioAtualView(APIView):
+    """
+    Retorna os dados do usuário autenticado, incluindo o tipo do perfil.
+
+    GET → exige token válido no cabeçalho Authorization.
+          Retorna id, username, email, first_name, last_name e tipo do perfil.
+          Se o usuário não tiver Perfil associado, tipo é retornado como null.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        tags=["Autenticação"],
+        operation_summary="Usuário atual",
+        operation_description=(
+            "Retorna os dados do usuário autenticado pelo token informado.\n\n"
+            "Útil para o frontend identificar o perfil do usuário após o login "
+            "ou ao restaurar uma sessão existente."
+        ),
+        manual_parameters=[_AUTH_HEADER],
+        responses={
+            200: openapi.Response(
+                "Dados do usuário autenticado",
+                openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "username": openapi.Schema(type=openapi.TYPE_STRING),
+                        "email": openapi.Schema(type=openapi.TYPE_STRING),
+                        "first_name": openapi.Schema(type=openapi.TYPE_STRING),
+                        "last_name": openapi.Schema(type=openapi.TYPE_STRING),
+                        "tipo": openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            description="Tipo do perfil: cliente, atendente ou gerente. null se não houver perfil.",
+                            nullable=True,
+                        ),
+                    },
+                ),
+            ),
+            401: openapi.Response("Não autenticado — token ausente ou inválido"),
+        },
+    )
+    def get(self, request):
+        """Retorna os dados e o tipo do perfil do usuário autenticado."""
+        try:
+            tipo = request.user.perfil.tipo
+        except Exception:
+            tipo = None
+
+        return Response(
+            {
+                "id": request.user.pk,
+                "username": request.user.username,
+                "email": request.user.email,
+                "first_name": request.user.first_name,
+                "last_name": request.user.last_name,
+                "tipo": tipo,
             },
             status=status.HTTP_200_OK,
         )
