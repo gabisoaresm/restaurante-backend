@@ -15,6 +15,8 @@ Recuperação de senha esquecida (django-rest-passwordreset):
 
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
@@ -51,19 +53,20 @@ class RegistroView(APIView):
         operation_summary="Registrar novo usuário",
         operation_description=(
             "Cria um novo usuário com perfil do tipo **cliente**.\n\n"
-            "Campos obrigatórios: `username` e `password`.\n"
-            "Campos opcionais: `email`, `first_name`, `last_name`.\n\n"
-            "**Dica:** informe o `email` — ele é necessário para recuperação de senha."
+            "Todos os campos são obrigatórios: `username`, `password`, `email`, `first_name` e `last_name`.\n\n"
+            "O `email` deve ser único — não é permitido cadastrar dois usuários com o mesmo e-mail.\n\n"
+            "A senha deve ter no mínimo 8 caracteres, não pode ser muito comum, "
+            "não pode ser inteiramente numérica e não pode ser muito parecida com username ou e-mail."
         ),
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=["username", "password"],
+            required=["username", "password", "email", "first_name", "last_name"],
             properties={
-                "username": openapi.Schema(type=openapi.TYPE_STRING, description="Nome de usuário único"),
-                "password": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_PASSWORD, description="Senha"),
-                "email": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_EMAIL, description="E-mail (necessário para recuperação de senha)"),
-                "first_name": openapi.Schema(type=openapi.TYPE_STRING, description="Nome (opcional)"),
-                "last_name": openapi.Schema(type=openapi.TYPE_STRING, description="Sobrenome (opcional)"),
+                "username":   openapi.Schema(type=openapi.TYPE_STRING, description="Nome de usuário único"),
+                "password":   openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_PASSWORD, description="Senha (mínimo 8 chars, não pode ser comum ou só numérica)"),
+                "email":      openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_EMAIL, description="E-mail único — necessário para recuperação de senha"),
+                "first_name": openapi.Schema(type=openapi.TYPE_STRING, description="Nome"),
+                "last_name":  openapi.Schema(type=openapi.TYPE_STRING, description="Sobrenome"),
             },
         ),
         responses={
@@ -86,22 +89,41 @@ class RegistroView(APIView):
     )
     def post(self, request):
         """Cria um novo usuário e o Perfil com tipo 'cliente'."""
-        username = request.data.get("username", "").strip()
-        password = request.data.get("password", "")
-        email = request.data.get("email", "").strip()
+        username   = request.data.get("username",   "").strip()
+        password   = request.data.get("password",   "")
+        email      = request.data.get("email",      "").strip().lower()
         first_name = request.data.get("first_name", "").strip()
-        last_name = request.data.get("last_name", "").strip()
+        last_name  = request.data.get("last_name",  "").strip()
 
-        # Validações básicas de entrada
-        if not username or not password:
+        # Todos os campos são obrigatórios
+        if not username or not password or not email or not first_name or not last_name:
             return Response(
-                {"erro": "username e password são obrigatórios."},
+                {"erro": "Todos os campos são obrigatórios: username, password, email, first_name e last_name."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         if User.objects.filter(username=username).exists():
             return Response(
-                {"erro": "Esse username já está em uso."},
+                {"erro": "Esse nome de usuário já está em uso."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Verifica unicidade de e-mail (case-insensitive, como no Trabalho 1)
+        if User.objects.filter(email__iexact=email).exists():
+            return Response(
+                {"erro": "Já existe um usuário cadastrado com este e-mail."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Valida a senha usando os validators do Django (mínimo 8 chars, não comum, etc.)
+        # Cria um objeto User temporário para que o UserAttributeSimilarityValidator
+        # possa comparar a senha com username e email do novo usuário
+        user_temp = User(username=username, email=email, first_name=first_name, last_name=last_name)
+        try:
+            validate_password(password, user=user_temp)
+        except ValidationError as exc:
+            return Response(
+                {"erro": " ".join(exc.messages)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
