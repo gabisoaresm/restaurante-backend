@@ -11,12 +11,23 @@ Leitura (GET) é pública — qualquer um pode consultar o cardápio sem autenti
 Escrita (POST, PUT, DELETE) exige token válido e perfil do tipo 'gerente'.
 """
 
+from drf_yasg import openapi
+from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Categoria, ItemCardapio
 from .serializers import CategoriaSerializer, ItemCardapioSerializer
+
+# Parâmetro de cabeçalho de autenticação reutilizado em todos os endpoints protegidos
+_AUTH_HEADER = openapi.Parameter(
+    "Authorization",
+    openapi.IN_HEADER,
+    description="Token de autenticação. Formato: Token <seu_token>",
+    type=openapi.TYPE_STRING,
+    required=True,
+)
 
 
 def _checar_gerente(request):
@@ -56,12 +67,31 @@ class CategoriaListView(APIView):
     POST → requer token de gerente; cria uma nova categoria; retorna 201.
     """
 
+    @swagger_auto_schema(
+        tags=["Cardápio — Categorias"],
+        operation_summary="Listar categorias",
+        operation_description="Retorna todas as categorias cadastradas. Acesso público, sem autenticação.",
+        responses={200: CategoriaSerializer(many=True)},
+    )
     def get(self, request):
         """Retorna todas as categorias cadastradas. Acesso público."""
         categorias = Categoria.objects.all()
         serializer = CategoriaSerializer(categorias, many=True)
         return Response(serializer.data)
 
+    @swagger_auto_schema(
+        tags=["Cardápio — Categorias"],
+        operation_summary="Criar categoria",
+        operation_description="Cria uma nova categoria. Requer token de gerente no cabeçalho Authorization.",
+        manual_parameters=[_AUTH_HEADER],
+        request_body=CategoriaSerializer,
+        responses={
+            201: CategoriaSerializer,
+            400: openapi.Response("Dados inválidos"),
+            401: openapi.Response("Não autenticado — cabeçalho Authorization ausente ou inválido"),
+            403: openapi.Response("Acesso negado — apenas gerentes podem criar categorias"),
+        },
+    )
     def post(self, request):
         """Cria uma nova categoria. Requer autenticação com perfil gerente."""
         erro = _checar_gerente(request)
@@ -90,6 +120,15 @@ class CategoriaDetailView(APIView):
         except Categoria.DoesNotExist:
             return None
 
+    @swagger_auto_schema(
+        tags=["Cardápio — Categorias"],
+        operation_summary="Detalhar categoria",
+        operation_description="Retorna os dados de uma categoria pelo id. Acesso público.",
+        responses={
+            200: CategoriaSerializer,
+            404: openapi.Response("Categoria não encontrada"),
+        },
+    )
     def get(self, request, pk):
         """Retorna os dados de uma categoria pelo id. Acesso público."""
         categoria = self._get_object(pk)
@@ -98,6 +137,20 @@ class CategoriaDetailView(APIView):
         serializer = CategoriaSerializer(categoria)
         return Response(serializer.data)
 
+    @swagger_auto_schema(
+        tags=["Cardápio — Categorias"],
+        operation_summary="Atualizar categoria",
+        operation_description="Substitui todos os campos de uma categoria. Requer token de gerente.",
+        manual_parameters=[_AUTH_HEADER],
+        request_body=CategoriaSerializer,
+        responses={
+            200: CategoriaSerializer,
+            400: openapi.Response("Dados inválidos"),
+            401: openapi.Response("Não autenticado"),
+            403: openapi.Response("Acesso negado — apenas gerentes"),
+            404: openapi.Response("Categoria não encontrada"),
+        },
+    )
     def put(self, request, pk):
         """Atualiza todos os campos de uma categoria. Requer autenticação com perfil gerente."""
         erro = _checar_gerente(request)
@@ -112,6 +165,18 @@ class CategoriaDetailView(APIView):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    @swagger_auto_schema(
+        tags=["Cardápio — Categorias"],
+        operation_summary="Remover categoria",
+        operation_description="Remove uma categoria pelo id. Requer token de gerente.",
+        manual_parameters=[_AUTH_HEADER],
+        responses={
+            204: openapi.Response("Categoria removida com sucesso"),
+            401: openapi.Response("Não autenticado"),
+            403: openapi.Response("Acesso negado — apenas gerentes"),
+            404: openapi.Response("Categoria não encontrada"),
+        },
+    )
     def delete(self, request, pk):
         """Remove uma categoria pelo id. Requer autenticação com perfil gerente."""
         erro = _checar_gerente(request)
@@ -134,6 +199,24 @@ class ItemCardapioListView(APIView):
     POST → requer token de gerente; cria um novo item; retorna 201.
     """
 
+    @swagger_auto_schema(
+        tags=["Cardápio — Itens"],
+        operation_summary="Listar itens do cardápio",
+        operation_description=(
+            "Retorna todos os itens do cardápio. Acesso público.\n\n"
+            "Use o parâmetro opcional `?categoria=<id>` para filtrar por categoria."
+        ),
+        manual_parameters=[
+            openapi.Parameter(
+                "categoria",
+                openapi.IN_QUERY,
+                description="Filtra itens pelo id da categoria",
+                type=openapi.TYPE_INTEGER,
+                required=False,
+            )
+        ],
+        responses={200: ItemCardapioSerializer(many=True)},
+    )
     def get(self, request):
         """
         Retorna todos os itens do cardápio. Acesso público.
@@ -146,6 +229,19 @@ class ItemCardapioListView(APIView):
         serializer = ItemCardapioSerializer(itens, many=True)
         return Response(serializer.data)
 
+    @swagger_auto_schema(
+        tags=["Cardápio — Itens"],
+        operation_summary="Criar item do cardápio",
+        operation_description="Cria um novo item no cardápio. Requer token de gerente.",
+        manual_parameters=[_AUTH_HEADER],
+        request_body=ItemCardapioSerializer,
+        responses={
+            201: ItemCardapioSerializer,
+            400: openapi.Response("Dados inválidos"),
+            401: openapi.Response("Não autenticado"),
+            403: openapi.Response("Acesso negado — apenas gerentes"),
+        },
+    )
     def post(self, request):
         """Cria um novo item do cardápio. Requer autenticação com perfil gerente."""
         erro = _checar_gerente(request)
@@ -174,6 +270,15 @@ class ItemCardapioDetailView(APIView):
         except ItemCardapio.DoesNotExist:
             return None
 
+    @swagger_auto_schema(
+        tags=["Cardápio — Itens"],
+        operation_summary="Detalhar item do cardápio",
+        operation_description="Retorna os dados de um item do cardápio pelo id. Acesso público.",
+        responses={
+            200: ItemCardapioSerializer,
+            404: openapi.Response("Item não encontrado"),
+        },
+    )
     def get(self, request, pk):
         """Retorna os dados de um item do cardápio pelo id. Acesso público."""
         item = self._get_object(pk)
@@ -182,6 +287,20 @@ class ItemCardapioDetailView(APIView):
         serializer = ItemCardapioSerializer(item)
         return Response(serializer.data)
 
+    @swagger_auto_schema(
+        tags=["Cardápio — Itens"],
+        operation_summary="Atualizar item do cardápio",
+        operation_description="Substitui todos os campos de um item do cardápio. Requer token de gerente.",
+        manual_parameters=[_AUTH_HEADER],
+        request_body=ItemCardapioSerializer,
+        responses={
+            200: ItemCardapioSerializer,
+            400: openapi.Response("Dados inválidos"),
+            401: openapi.Response("Não autenticado"),
+            403: openapi.Response("Acesso negado — apenas gerentes"),
+            404: openapi.Response("Item não encontrado"),
+        },
+    )
     def put(self, request, pk):
         """Atualiza todos os campos de um item do cardápio. Requer autenticação com perfil gerente."""
         erro = _checar_gerente(request)
@@ -196,6 +315,18 @@ class ItemCardapioDetailView(APIView):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    @swagger_auto_schema(
+        tags=["Cardápio — Itens"],
+        operation_summary="Remover item do cardápio",
+        operation_description="Remove um item do cardápio pelo id. Requer token de gerente.",
+        manual_parameters=[_AUTH_HEADER],
+        responses={
+            204: openapi.Response("Item removido com sucesso"),
+            401: openapi.Response("Não autenticado"),
+            403: openapi.Response("Acesso negado — apenas gerentes"),
+            404: openapi.Response("Item não encontrado"),
+        },
+    )
     def delete(self, request, pk):
         """Remove um item do cardápio pelo id. Requer autenticação com perfil gerente."""
         erro = _checar_gerente(request)

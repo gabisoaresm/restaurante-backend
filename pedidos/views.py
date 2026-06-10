@@ -19,6 +19,8 @@ Fluxo de status válido: recebido → em_preparo → pronto → entregue.
 Qualquer tentativa de pular ou regredir o status retorna HTTP 400.
 """
 
+from drf_yasg import openapi
+from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
 from rest_framework.authentication import TokenAuthentication
 from rest_framework.permissions import IsAuthenticated
@@ -34,6 +36,15 @@ PROXIMO_STATUS = {
     "em_preparo": "pronto",
     "pronto": "entregue",
 }
+
+# Parâmetro de cabeçalho de autenticação reutilizado em todos os endpoints
+_AUTH_HEADER = openapi.Parameter(
+    "Authorization",
+    openapi.IN_HEADER,
+    description="Token de autenticação. Formato: Token <seu_token>",
+    type=openapi.TYPE_STRING,
+    required=True,
+)
 
 
 def _get_tipo(user):
@@ -55,6 +66,39 @@ class PedidoListView(APIView):
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
+    @swagger_auto_schema(
+        tags=["Pedidos"],
+        operation_summary="Listar pedidos",
+        operation_description=(
+            "Retorna pedidos filtrados conforme o perfil do usuário autenticado:\n\n"
+            "- **cliente** → apenas os próprios pedidos.\n"
+            "- **atendente** → todos os pedidos (fila de trabalho).\n"
+            "- **gerente** → todos os pedidos.\n\n"
+            "Filtros opcionais: `?status=recebido` e `?data=2025-06-09`."
+        ),
+        manual_parameters=[
+            _AUTH_HEADER,
+            openapi.Parameter(
+                "status",
+                openapi.IN_QUERY,
+                description="Filtra pedidos pelo status (recebido, em_preparo, pronto, entregue)",
+                type=openapi.TYPE_STRING,
+                required=False,
+            ),
+            openapi.Parameter(
+                "data",
+                openapi.IN_QUERY,
+                description="Filtra pedidos pela data de criação (formato YYYY-MM-DD)",
+                type=openapi.TYPE_STRING,
+                required=False,
+            ),
+        ],
+        responses={
+            200: PedidoSerializer(many=True),
+            401: openapi.Response("Não autenticado"),
+            403: openapi.Response("Perfil inválido"),
+        },
+    )
     def get(self, request):
         """
         Retorna pedidos filtrados pelo tipo de perfil:
@@ -88,6 +132,23 @@ class PedidoListView(APIView):
         serializer = PedidoSerializer(queryset, many=True)
         return Response(serializer.data)
 
+    @swagger_auto_schema(
+        tags=["Pedidos"],
+        operation_summary="Criar pedido",
+        operation_description=(
+            "Cria um novo pedido para o cliente autenticado.\n\n"
+            "Apenas usuários com perfil **cliente** podem criar pedidos. "
+            "O campo `cliente` é preenchido automaticamente com o usuário autenticado."
+        ),
+        manual_parameters=[_AUTH_HEADER],
+        request_body=PedidoSerializer,
+        responses={
+            201: PedidoSerializer,
+            400: openapi.Response("Dados inválidos"),
+            401: openapi.Response("Não autenticado"),
+            403: openapi.Response("Acesso negado — apenas clientes podem criar pedidos"),
+        },
+    )
     def post(self, request):
         """
         Cria um novo pedido para o cliente autenticado.
@@ -127,6 +188,21 @@ class PedidoDetailView(APIView):
         except Pedido.DoesNotExist:
             return None
 
+    @swagger_auto_schema(
+        tags=["Pedidos"],
+        operation_summary="Detalhar pedido",
+        operation_description=(
+            "Retorna os dados de um pedido pelo id.\n\n"
+            "- **cliente** → só pode ver pedidos próprios (404 se tentar ver de outro cliente).\n"
+            "- **atendente / gerente** → pode ver qualquer pedido."
+        ),
+        manual_parameters=[_AUTH_HEADER],
+        responses={
+            200: PedidoSerializer,
+            401: openapi.Response("Não autenticado"),
+            404: openapi.Response("Pedido não encontrado (ou não pertence ao cliente)"),
+        },
+    )
     def get(self, request, pk):
         """
         Retorna os dados de um pedido pelo id.
@@ -146,6 +222,35 @@ class PedidoDetailView(APIView):
         serializer = PedidoSerializer(pedido)
         return Response(serializer.data)
 
+    @swagger_auto_schema(
+        tags=["Pedidos"],
+        operation_summary="Atualizar status do pedido",
+        operation_description=(
+            "Avança o status de um pedido seguindo o fluxo obrigatório:\n\n"
+            "`recebido` → `em_preparo` → `pronto` → `entregue`\n\n"
+            "Apenas **atendente** ou **gerente** podem alterar o status. "
+            "Retorna 400 se o status enviado não for o próximo válido no fluxo."
+        ),
+        manual_parameters=[_AUTH_HEADER],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["status"],
+            properties={
+                "status": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    enum=["em_preparo", "pronto", "entregue"],
+                    description="Próximo status no fluxo de preparo",
+                )
+            },
+        ),
+        responses={
+            200: PedidoSerializer,
+            400: openapi.Response("Status inválido ou pedido já entregue"),
+            401: openapi.Response("Não autenticado"),
+            403: openapi.Response("Acesso negado — apenas atendentes e gerentes"),
+            404: openapi.Response("Pedido não encontrado"),
+        },
+    )
     def patch(self, request, pk):
         """
         Atualiza o status de um pedido seguindo o fluxo obrigatório:
@@ -190,6 +295,18 @@ class PedidoDetailView(APIView):
         serializer = PedidoSerializer(pedido)
         return Response(serializer.data)
 
+    @swagger_auto_schema(
+        tags=["Pedidos"],
+        operation_summary="Remover pedido",
+        operation_description="Remove um pedido pelo id. Apenas **gerentes** podem excluir pedidos.",
+        manual_parameters=[_AUTH_HEADER],
+        responses={
+            204: openapi.Response("Pedido removido com sucesso"),
+            401: openapi.Response("Não autenticado"),
+            403: openapi.Response("Acesso negado — apenas gerentes"),
+            404: openapi.Response("Pedido não encontrado"),
+        },
+    )
     def delete(self, request, pk):
         """
         Remove um pedido pelo id.

@@ -6,10 +6,16 @@ Endpoints implementados:
   POST   /api/accounts/token-auth/   → valida credenciais, retorna token (200)
   DELETE /api/accounts/token-auth/   → invalida o token atual, realiza logout (200)
   POST   /api/accounts/troca-senha/  → troca a senha do usuário autenticado e renova o token (200)
+
+Recuperação de senha esquecida (django-rest-passwordreset):
+  POST   /api/accounts/password_reset/          → solicita token de redefinição por e-mail
+  POST   /api/accounts/password_reset/confirm/  → confirma nova senha usando o token recebido
 """
 
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
+from drf_yasg import openapi
+from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
 from rest_framework.authentication import TokenAuthentication
 from rest_framework.authtoken.models import Token
@@ -18,6 +24,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Perfil
+
+# Parâmetro de cabeçalho de autenticação reutilizado nos endpoints protegidos
+_AUTH_HEADER = openapi.Parameter(
+    "Authorization",
+    openapi.IN_HEADER,
+    description="Token de autenticação. Formato: Token <seu_token>",
+    type=openapi.TYPE_STRING,
+    required=True,
+)
 
 
 class RegistroView(APIView):
@@ -30,6 +45,44 @@ class RegistroView(APIView):
             forem inválidos (ex.: username já existe, senha em branco).
     """
 
+    @swagger_auto_schema(
+        tags=["Autenticação"],
+        operation_summary="Registrar novo usuário",
+        operation_description=(
+            "Cria um novo usuário com perfil do tipo **cliente**.\n\n"
+            "Campos obrigatórios: `username` e `password`.\n"
+            "Campos opcionais: `email`, `first_name`, `last_name`.\n\n"
+            "**Dica:** informe o `email` — ele é necessário para recuperação de senha."
+        ),
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["username", "password"],
+            properties={
+                "username": openapi.Schema(type=openapi.TYPE_STRING, description="Nome de usuário único"),
+                "password": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_PASSWORD, description="Senha"),
+                "email": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_EMAIL, description="E-mail (necessário para recuperação de senha)"),
+                "first_name": openapi.Schema(type=openapi.TYPE_STRING, description="Nome (opcional)"),
+                "last_name": openapi.Schema(type=openapi.TYPE_STRING, description="Sobrenome (opcional)"),
+            },
+        ),
+        responses={
+            201: openapi.Response(
+                "Usuário criado com sucesso",
+                openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "username": openapi.Schema(type=openapi.TYPE_STRING),
+                        "email": openapi.Schema(type=openapi.TYPE_STRING),
+                        "first_name": openapi.Schema(type=openapi.TYPE_STRING),
+                        "last_name": openapi.Schema(type=openapi.TYPE_STRING),
+                        "tipo": openapi.Schema(type=openapi.TYPE_STRING, description="Sempre 'cliente' no registro"),
+                    },
+                ),
+            ),
+            400: openapi.Response("Dados inválidos — username já existe ou campos obrigatórios ausentes"),
+        },
+    )
     def post(self, request):
         """Cria um novo usuário e o Perfil com tipo 'cliente'."""
         username = request.data.get("username", "").strip()
@@ -87,6 +140,39 @@ class CustomAuthToken(APIView):
              Retorna 400 se o cabeçalho estiver ausente ou malformado.
     """
 
+    @swagger_auto_schema(
+        tags=["Autenticação"],
+        operation_summary="Login — obter token",
+        operation_description=(
+            "Autentica o usuário com `username` e `password`. "
+            "Retorna o token de acesso a ser enviado no cabeçalho `Authorization` "
+            "nas requisições subsequentes.\n\n"
+            "**Como usar o token:** nas demais requisições protegidas, adicione o cabeçalho:\n"
+            "`Authorization: Token <valor_retornado_aqui>`"
+        ),
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["username", "password"],
+            properties={
+                "username": openapi.Schema(type=openapi.TYPE_STRING, description="Nome de usuário"),
+                "password": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_PASSWORD, description="Senha"),
+            },
+        ),
+        responses={
+            200: openapi.Response(
+                "Login bem-sucedido",
+                openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "token": openapi.Schema(type=openapi.TYPE_STRING, description="Token de autenticação — use nas próximas requisições"),
+                        "user_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "username": openapi.Schema(type=openapi.TYPE_STRING),
+                    },
+                ),
+            ),
+            401: openapi.Response("Credenciais inválidas"),
+        },
+    )
     def post(self, request):
         """Autentica o usuário e retorna o token de acesso."""
         username = request.data.get("username")
@@ -112,6 +198,19 @@ class CustomAuthToken(APIView):
             status=status.HTTP_200_OK,
         )
 
+    @swagger_auto_schema(
+        tags=["Autenticação"],
+        operation_summary="Logout — invalidar token",
+        operation_description=(
+            "Invalida o token do usuário autenticado e realiza logout.\n\n"
+            "Envie o token no cabeçalho `Authorization` no formato `Token <seu_token>`."
+        ),
+        manual_parameters=[_AUTH_HEADER],
+        responses={
+            200: openapi.Response("Logout realizado com sucesso"),
+            400: openapi.Response("Cabeçalho Authorization ausente ou token inválido"),
+        },
+    )
     def delete(self, request):
         """Invalida o token do usuário e realiza logout."""
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
@@ -161,6 +260,39 @@ class TrocaSenhaView(APIView):
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
+    @swagger_auto_schema(
+        tags=["Autenticação"],
+        operation_summary="Trocar senha",
+        operation_description=(
+            "Troca a senha do usuário autenticado e retorna um **novo token** de acesso.\n\n"
+            "O token antigo é invalidado imediatamente após a troca. "
+            "Use o novo token retornado nas requisições seguintes."
+        ),
+        manual_parameters=[_AUTH_HEADER],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["old_password", "new_password1", "new_password2"],
+            properties={
+                "old_password": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_PASSWORD, description="Senha atual"),
+                "new_password1": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_PASSWORD, description="Nova senha"),
+                "new_password2": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_PASSWORD, description="Confirmação da nova senha"),
+            },
+        ),
+        responses={
+            200: openapi.Response(
+                "Senha alterada com sucesso",
+                openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "mensagem": openapi.Schema(type=openapi.TYPE_STRING),
+                        "token": openapi.Schema(type=openapi.TYPE_STRING, description="Novo token — use este nas próximas requisições"),
+                    },
+                ),
+            ),
+            400: openapi.Response("Senha atual incorreta ou novas senhas não coincidem"),
+            401: openapi.Response("Não autenticado — token ausente ou inválido"),
+        },
+    )
     def post(self, request):
         """Valida a senha atual, aplica a nova e retorna um token renovado."""
         old_password = request.data.get("old_password", "")
