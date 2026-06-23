@@ -13,6 +13,7 @@ Cobre:
   - Validação de CVV e número inválido
   - GET /api/accounts/usuarios/ (listar usuários — somente gerente)
   - PATCH /api/accounts/usuarios/<id>/ (alterar tipo de perfil — somente gerente)
+  - DELETE /api/accounts/usuarios/<id>/ (excluir usuário — somente gerente)
 """
 
 from django.contrib.auth.models import User
@@ -474,3 +475,49 @@ class AlterarPerfilUsuarioTests(APITestCase):
         self.assertEqual(res.status_code, 200)
         campos = {"id", "username", "first_name", "last_name", "email", "tipo", "date_joined"}
         self.assertTrue(campos.issubset(res.data.keys()))
+
+
+class ExcluirUsuarioTests(APITestCase):
+    """Testa DELETE /api/accounts/usuarios/<id>/ — excluir usuário."""
+
+    def setUp(self):
+        self.gerente, self.token_ger  = _criar_usuario("gerente3",  tipo="gerente")
+        self.atend,   self.token_aten = _criar_usuario("atendente3", tipo="atendente")
+        self.cli,     self.token_cli  = _criar_usuario("cliente3",   tipo="cliente")
+        self.url_cli = f"/api/accounts/usuarios/{self.cli.pk}/"
+
+    def test_gerente_exclui_usuario(self):
+        """Gerente pode excluir outro usuário — retorna 204 e remove do banco."""
+        res = self.client.delete(self.url_cli, **_auth(self.token_ger))
+        self.assertEqual(res.status_code, 204)
+        self.assertFalse(User.objects.filter(pk=self.cli.pk).exists())
+
+    def test_gerente_nao_pode_excluir_a_si_mesmo(self):
+        """Gerente não pode excluir a própria conta — retorna 400."""
+        url_self = f"/api/accounts/usuarios/{self.gerente.pk}/"
+        res = self.client.delete(url_self, **_auth(self.token_ger))
+        self.assertEqual(res.status_code, 400)
+        # Conta do gerente deve permanecer no banco
+        self.assertTrue(User.objects.filter(pk=self.gerente.pk).exists())
+
+    def test_usuario_inexistente_retorna_404(self):
+        """pk de usuário que não existe retorna 404."""
+        res = self.client.delete("/api/accounts/usuarios/99999/", **_auth(self.token_ger))
+        self.assertEqual(res.status_code, 404)
+
+    def test_atendente_nao_pode_excluir(self):
+        """Atendente recebe 403 ao tentar excluir usuário."""
+        res = self.client.delete(self.url_cli, **_auth(self.token_aten))
+        self.assertEqual(res.status_code, 403)
+        self.assertTrue(User.objects.filter(pk=self.cli.pk).exists())
+
+    def test_cliente_nao_pode_excluir(self):
+        """Cliente recebe 403 ao tentar excluir usuário."""
+        res = self.client.delete(self.url_cli, **_auth(self.token_cli))
+        self.assertEqual(res.status_code, 403)
+        self.assertTrue(User.objects.filter(pk=self.cli.pk).exists())
+
+    def test_sem_auth_retorna_401(self):
+        """Requisição sem token retorna 401."""
+        res = self.client.delete(self.url_cli)
+        self.assertEqual(res.status_code, 401)

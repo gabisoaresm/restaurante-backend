@@ -12,6 +12,9 @@ Endpoints implementados:
   POST   /api/accounts/cartoes/         → adiciona novo cartão ao cliente autenticado (201)
   GET    /api/accounts/cartoes/<id>/    → detalha um cartão do cliente (200)
   DELETE /api/accounts/cartoes/<id>/    → remove um cartão do cliente (204)
+  GET    /api/accounts/usuarios/        → lista todos os usuários (somente gerente) (200)
+  PATCH  /api/accounts/usuarios/<pk>/   → altera tipo de perfil de um usuário (somente gerente) (200)
+  DELETE /api/accounts/usuarios/<pk>/   → remove um usuário do sistema (somente gerente) (204)
 
 Recuperação de senha esquecida (django-rest-passwordreset):
   POST   /api/accounts/password_reset/          → solicita token de redefinição por e-mail
@@ -793,3 +796,46 @@ class UsuarioAlterarPerfilView(APIView):
             "tipo":        novo_tipo,
             "date_joined": usuario.date_joined.strftime("%d/%m/%Y"),
         })
+
+    @swagger_auto_schema(
+        tags=["Usuários"],
+        operation_summary="Excluir usuário",
+        operation_description=(
+            "Remove permanentemente um usuário do sistema.\n\n"
+            "Apenas gerentes podem acessar este endpoint.\n\n"
+            "O gerente não pode excluir a si mesmo."
+        ),
+        manual_parameters=[_AUTH_HEADER],
+        responses={
+            204: openapi.Response("Usuário excluído com sucesso"),
+            400: openapi.Response("Operação não permitida (ex.: auto-exclusão)"),
+            403: openapi.Response("Acesso negado — apenas gerentes"),
+            404: openapi.Response("Usuário não encontrado"),
+        },
+    )
+    def delete(self, request, pk):
+        """Remove o usuário indicado pelo pk. Gerente não pode excluir a si mesmo."""
+        try:
+            tipo_solicitante = request.user.perfil.tipo
+        except Exception:
+            tipo_solicitante = None
+
+        if tipo_solicitante != "gerente":
+            return Response(
+                {"erro": "Apenas gerentes podem excluir usuários."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if request.user.pk == pk:
+            return Response(
+                {"erro": "Você não pode excluir sua própria conta."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            usuario = User.objects.get(pk=pk)
+        except User.DoesNotExist:
+            return Response({"erro": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+
+        usuario.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
