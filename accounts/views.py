@@ -634,3 +634,162 @@ class CartaoDetailView(APIView):
             return Response({"erro": "Cartão não encontrado."}, status=status.HTTP_404_NOT_FOUND)
         cartao.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UsuariosListView(APIView):
+    """
+    Lista todos os usuários cadastrados no sistema.
+
+    Endpoint protegido: exige token de gerente.
+
+    GET → retorna id, username, first_name, last_name, email, tipo e date_joined
+          de todos os usuários com Perfil associado, ordenados por username.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        tags=["Usuários"],
+        operation_summary="Listar usuários",
+        operation_description=(
+            "Retorna todos os usuários cadastrados no sistema com seu tipo de perfil.\n\n"
+            "Apenas gerentes podem acessar este endpoint."
+        ),
+        manual_parameters=[_AUTH_HEADER],
+        responses={
+            200: openapi.Response(
+                "Lista de usuários",
+                openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            "id":          openapi.Schema(type=openapi.TYPE_INTEGER),
+                            "username":    openapi.Schema(type=openapi.TYPE_STRING),
+                            "first_name":  openapi.Schema(type=openapi.TYPE_STRING),
+                            "last_name":   openapi.Schema(type=openapi.TYPE_STRING),
+                            "email":       openapi.Schema(type=openapi.TYPE_STRING),
+                            "tipo":        openapi.Schema(type=openapi.TYPE_STRING, nullable=True),
+                            "date_joined": openapi.Schema(type=openapi.TYPE_STRING),
+                        },
+                    ),
+                ),
+            ),
+            403: openapi.Response("Acesso negado — apenas gerentes"),
+        },
+    )
+    def get(self, request):
+        """Lista todos os usuários com seu tipo de perfil."""
+        try:
+            tipo_solicitante = request.user.perfil.tipo
+        except Exception:
+            tipo_solicitante = None
+
+        if tipo_solicitante != "gerente":
+            return Response(
+                {"erro": "Apenas gerentes podem acessar a lista de usuários."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        usuarios = User.objects.select_related("perfil").order_by("username")
+        resultado = []
+        for u in usuarios:
+            try:
+                tipo_usuario = u.perfil.tipo
+            except Exception:
+                tipo_usuario = None
+
+            resultado.append({
+                "id":          u.pk,
+                "username":    u.username,
+                "first_name":  u.first_name,
+                "last_name":   u.last_name,
+                "email":       u.email,
+                "tipo":        tipo_usuario,
+                "date_joined": u.date_joined.strftime("%d/%m/%Y"),
+            })
+
+        return Response(resultado)
+
+
+class UsuarioAlterarPerfilView(APIView):
+    """
+    Altera o tipo de perfil de um usuário específico.
+
+    Endpoint protegido: exige token de gerente.
+
+    PATCH → recebe {'tipo': 'cliente'|'atendente'|'gerente'} e atualiza
+            o Perfil do usuário indicado pelo pk na URL.
+            Cria o Perfil caso não exista (ex.: superusuário do Django admin).
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        tags=["Usuários"],
+        operation_summary="Alterar tipo de perfil",
+        operation_description=(
+            "Altera o tipo de perfil de um usuário. "
+            "Apenas gerentes podem acessar este endpoint.\n\n"
+            "Tipos válidos: `cliente`, `atendente`, `gerente`."
+        ),
+        manual_parameters=[_AUTH_HEADER],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["tipo"],
+            properties={
+                "tipo": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Novo tipo de perfil: cliente, atendente ou gerente",
+                ),
+            },
+        ),
+        responses={
+            200: openapi.Response("Perfil atualizado com sucesso"),
+            400: openapi.Response("Tipo inválido"),
+            403: openapi.Response("Acesso negado — apenas gerentes"),
+            404: openapi.Response("Usuário não encontrado"),
+        },
+    )
+    def patch(self, request, pk):
+        """Atualiza o tipo de perfil do usuário indicado pelo pk."""
+        try:
+            tipo_solicitante = request.user.perfil.tipo
+        except Exception:
+            tipo_solicitante = None
+
+        if tipo_solicitante != "gerente":
+            return Response(
+                {"erro": "Apenas gerentes podem alterar perfis de usuários."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            usuario = User.objects.get(pk=pk)
+        except User.DoesNotExist:
+            return Response({"erro": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+
+        novo_tipo = request.data.get("tipo", "").strip()
+        tipos_validos = ["cliente", "atendente", "gerente"]
+        if novo_tipo not in tipos_validos:
+            return Response(
+                {"erro": f"Tipo inválido. Use um dos valores: {', '.join(tipos_validos)}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Cria o Perfil se não existir (ex.: superusuário do Django admin sem perfil)
+        perfil, _ = Perfil.objects.get_or_create(usuario=usuario)
+        perfil.tipo = novo_tipo
+        perfil.save(update_fields=["tipo"])
+
+        return Response({
+            "id":          usuario.pk,
+            "username":    usuario.username,
+            "first_name":  usuario.first_name,
+            "last_name":   usuario.last_name,
+            "email":       usuario.email,
+            "tipo":        novo_tipo,
+            "date_joined": usuario.date_joined.strftime("%d/%m/%Y"),
+        })

@@ -11,6 +11,8 @@ Cobre:
   - Controle de acesso: apenas clientes gerenciam cartões
   - Mascaramento do número do cartão
   - Validação de CVV e número inválido
+  - GET /api/accounts/usuarios/ (listar usuários — somente gerente)
+  - PATCH /api/accounts/usuarios/<id>/ (alterar tipo de perfil — somente gerente)
 """
 
 from django.contrib.auth.models import User
@@ -359,3 +361,116 @@ class CartaoDetailTests(APITestCase):
         """Sem token retorna 401."""
         res = self.client.get(self.url)
         self.assertEqual(res.status_code, 401)
+
+
+# ── Testes de gerenciamento de usuários (gerente) ─────────────────────────────
+
+class GerenciarUsuariosListTests(APITestCase):
+    """Testa GET /api/accounts/usuarios/ — listar todos os usuários."""
+
+    url = "/api/accounts/usuarios/"
+
+    def setUp(self):
+        self.gerente, self.token_ger  = _criar_usuario("gerente1",  tipo="gerente")
+        self.atend,   self.token_aten = _criar_usuario("atendente1", tipo="atendente")
+        self.cli,     self.token_cli  = _criar_usuario("cliente1",   tipo="cliente")
+
+    def test_gerente_lista_todos_usuarios(self):
+        """Gerente recebe 200 e a lista completa de usuários."""
+        res = self.client.get(self.url, **_auth(self.token_ger))
+        self.assertEqual(res.status_code, 200)
+        usernames = [u["username"] for u in res.data]
+        self.assertIn("gerente1",   usernames)
+        self.assertIn("atendente1", usernames)
+        self.assertIn("cliente1",   usernames)
+
+    def test_resposta_contem_campos_obrigatorios(self):
+        """Cada item da lista contém id, username, first_name, last_name, email, tipo e date_joined."""
+        res = self.client.get(self.url, **_auth(self.token_ger))
+        self.assertEqual(res.status_code, 200)
+        campos = {"id", "username", "first_name", "last_name", "email", "tipo", "date_joined"}
+        for usuario in res.data:
+            self.assertTrue(campos.issubset(usuario.keys()), msg=f"Campos ausentes em {usuario}")
+
+    def test_atendente_nao_pode_listar(self):
+        """Atendente recebe 403 ao tentar listar usuários."""
+        res = self.client.get(self.url, **_auth(self.token_aten))
+        self.assertEqual(res.status_code, 403)
+
+    def test_cliente_nao_pode_listar(self):
+        """Cliente recebe 403 ao tentar listar usuários."""
+        res = self.client.get(self.url, **_auth(self.token_cli))
+        self.assertEqual(res.status_code, 403)
+
+    def test_sem_auth_retorna_401(self):
+        """Requisição sem token retorna 401."""
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, 401)
+
+
+class AlterarPerfilUsuarioTests(APITestCase):
+    """Testa PATCH /api/accounts/usuarios/<id>/ — alterar tipo de perfil."""
+
+    def setUp(self):
+        self.gerente, self.token_ger  = _criar_usuario("gerente2",  tipo="gerente")
+        self.atend,   self.token_aten = _criar_usuario("atendente2", tipo="atendente")
+        self.cli,     self.token_cli  = _criar_usuario("cliente2",   tipo="cliente")
+        self.url_cli = f"/api/accounts/usuarios/{self.cli.pk}/"
+
+    def test_gerente_promove_cliente_para_atendente(self):
+        """Gerente pode mudar o tipo de um cliente para atendente — retorna 200."""
+        res = self.client.patch(self.url_cli, {"tipo": "atendente"}, **_auth(self.token_ger))
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["tipo"], "atendente")
+        # Confirma persistência no banco
+        self.cli.perfil.refresh_from_db()
+        self.assertEqual(self.cli.perfil.tipo, "atendente")
+
+    def test_gerente_promove_cliente_para_gerente(self):
+        """Gerente pode elevar outro usuário a gerente — retorna 200."""
+        res = self.client.patch(self.url_cli, {"tipo": "gerente"}, **_auth(self.token_ger))
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["tipo"], "gerente")
+
+    def test_gerente_mantem_tipo_igual(self):
+        """Gerente pode enviar o mesmo tipo atual — retorna 200 sem erro."""
+        res = self.client.patch(self.url_cli, {"tipo": "cliente"}, **_auth(self.token_ger))
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["tipo"], "cliente")
+
+    def test_tipo_invalido_retorna_400(self):
+        """Tipo inexistente retorna 400."""
+        res = self.client.patch(self.url_cli, {"tipo": "admin"}, **_auth(self.token_ger))
+        self.assertEqual(res.status_code, 400)
+
+    def test_tipo_em_branco_retorna_400(self):
+        """Tipo em branco retorna 400."""
+        res = self.client.patch(self.url_cli, {"tipo": ""}, **_auth(self.token_ger))
+        self.assertEqual(res.status_code, 400)
+
+    def test_usuario_inexistente_retorna_404(self):
+        """pk de usuário que não existe retorna 404."""
+        res = self.client.patch("/api/accounts/usuarios/99999/", {"tipo": "atendente"}, **_auth(self.token_ger))
+        self.assertEqual(res.status_code, 404)
+
+    def test_atendente_nao_pode_alterar(self):
+        """Atendente recebe 403 ao tentar alterar perfil."""
+        res = self.client.patch(self.url_cli, {"tipo": "atendente"}, **_auth(self.token_aten))
+        self.assertEqual(res.status_code, 403)
+
+    def test_cliente_nao_pode_alterar(self):
+        """Cliente recebe 403 ao tentar alterar perfil."""
+        res = self.client.patch(self.url_cli, {"tipo": "atendente"}, **_auth(self.token_cli))
+        self.assertEqual(res.status_code, 403)
+
+    def test_sem_auth_retorna_401(self):
+        """Requisição sem token retorna 401."""
+        res = self.client.patch(self.url_cli, {"tipo": "atendente"})
+        self.assertEqual(res.status_code, 401)
+
+    def test_resposta_contem_dados_atualizados(self):
+        """A resposta do PATCH contém todos os campos do usuário atualizado."""
+        res = self.client.patch(self.url_cli, {"tipo": "gerente"}, **_auth(self.token_ger))
+        self.assertEqual(res.status_code, 200)
+        campos = {"id", "username", "first_name", "last_name", "email", "tipo", "date_joined"}
+        self.assertTrue(campos.issubset(res.data.keys()))
