@@ -19,6 +19,9 @@ Fluxo de status válido: recebido → em_preparo → pronto → entregue.
 Qualquer tentativa de pular ou regredir o status retorna HTTP 400.
 """
 
+import datetime
+
+from django.utils import timezone
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
@@ -127,7 +130,15 @@ class PedidoListView(APIView):
         if filtro_status:
             queryset = queryset.filter(status=filtro_status)
         if filtro_data:
-            queryset = queryset.filter(data_hora__date=filtro_data)
+            try:
+                # Converte a data local (America/Sao_Paulo) para um intervalo UTC,
+                # garantindo que pedidos feitos em qualquer horário do dia sejam retornados.
+                data = datetime.datetime.strptime(filtro_data, "%Y-%m-%d").date()
+                inicio = timezone.make_aware(datetime.datetime.combine(data, datetime.time.min))
+                fim    = timezone.make_aware(datetime.datetime.combine(data, datetime.time.max))
+                queryset = queryset.filter(data_hora__range=(inicio, fim))
+            except ValueError:
+                pass  # data em formato inválido — ignora o filtro
 
         serializer = PedidoSerializer(queryset, many=True)
         return Response(serializer.data)
