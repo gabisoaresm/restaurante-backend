@@ -3,11 +3,13 @@ models.py — Modelos de pedidos do restaurante.
 
 Estrutura:
     User ──< Pedido ──< ItemPedido >── ItemCardapio
+    Pedido >──(opcional) CartaoSalvo
 """
 
 from django.contrib.auth.models import User
 from django.db import models
 
+from accounts.models import CartaoSalvo
 from cardapio.models import ItemCardapio
 
 
@@ -27,11 +29,10 @@ class Pedido(models.Model):
         ("entregue", "Entregue"),
     ]
 
+    # Apenas pagamentos com cartão são aceitos; a forma é derivada do tipo do cartão selecionado
     FORMA_PAGAMENTO_CHOICES = [
         ("cartao_credito", "Cartão de Crédito"),
-        ("cartao_debito", "Cartão de Débito"),
-        ("dinheiro", "Dinheiro"),
-        ("pix", "Pix"),
+        ("cartao_debito",  "Cartão de Débito"),
     ]
 
     cliente = models.ForeignKey(
@@ -59,6 +60,14 @@ class Pedido(models.Model):
         blank=True,
         default="",
         help_text="Observações adicionais do cliente sobre o pedido",
+    )
+    cartao_utilizado = models.ForeignKey(
+        CartaoSalvo,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="pedidos",
+        help_text="Cartão salvo usado no pagamento deste pedido",
     )
 
     class Meta:

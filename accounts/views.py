@@ -1,12 +1,16 @@
 """
-views.py — Views de autenticação do app accounts.
+views.py — Views de autenticação e cartões salvos do app accounts.
 
 Endpoints implementados:
-  POST   /api/accounts/registro/     → cria User + Perfil, retorna dados do usuário (201)
-  POST   /api/accounts/token-auth/   → valida credenciais, retorna token (200)
-  DELETE /api/accounts/token-auth/   → invalida o token atual, realiza logout (200)
-  POST   /api/accounts/troca-senha/  → troca a senha do usuário autenticado e renova o token (200)
-  GET    /api/accounts/me/           → retorna dados do usuário autenticado, incluindo tipo do perfil (200)
+  POST   /api/accounts/registro/        → cria User + Perfil, retorna dados do usuário (201)
+  POST   /api/accounts/token-auth/      → valida credenciais, retorna token (200)
+  DELETE /api/accounts/token-auth/      → invalida o token atual, realiza logout (200)
+  POST   /api/accounts/troca-senha/     → troca a senha do usuário autenticado e renova o token (200)
+  GET    /api/accounts/me/              → retorna dados do usuário autenticado, incluindo tipo do perfil (200)
+  GET    /api/accounts/cartoes/         → lista os cartões do cliente autenticado (200)
+  POST   /api/accounts/cartoes/         → adiciona novo cartão ao cliente autenticado (201)
+  GET    /api/accounts/cartoes/<id>/    → detalha um cartão do cliente (200)
+  DELETE /api/accounts/cartoes/<id>/    → remove um cartão do cliente (204)
 
 Recuperação de senha esquecida (django-rest-passwordreset):
   POST   /api/accounts/password_reset/          → solicita token de redefinição por e-mail
@@ -26,7 +30,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Perfil
+from .models import CartaoSalvo, Perfil
+from .serializers import CartaoSalvoSerializer
 
 # Parâmetro de cabeçalho de autenticação reutilizado nos endpoints protegidos
 _AUTH_HEADER = openapi.Parameter(
@@ -420,3 +425,137 @@ class UsuarioAtualView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class CartaoListView(APIView):
+    """
+    Lista os cartões salvos do cliente (GET) ou adiciona um novo cartão (POST).
+
+    Ambos os métodos exigem autenticação por token e perfil 'cliente'.
+    O campo 'usuario' é preenchido automaticamente com request.user.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        tags=["Cartões"],
+        operation_summary="Listar cartões salvos",
+        operation_description="Retorna todos os cartões salvos do cliente autenticado.",
+        manual_parameters=[_AUTH_HEADER],
+        responses={
+            200: CartaoSalvoSerializer(many=True),
+            401: openapi.Response("Não autenticado"),
+            403: openapi.Response("Acesso negado — apenas clientes podem gerenciar cartões"),
+        },
+    )
+    def get(self, request):
+        """Lista os cartões do cliente autenticado."""
+        try:
+            tipo = request.user.perfil.tipo
+        except Exception:
+            tipo = None
+
+        if tipo != "cliente":
+            return Response(
+                {"erro": "Apenas clientes podem gerenciar cartões."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        cartoes = CartaoSalvo.objects.filter(usuario=request.user)
+        serializer = CartaoSalvoSerializer(cartoes, many=True)
+        return Response(serializer.data)
+
+    @swagger_auto_schema(
+        tags=["Cartões"],
+        operation_summary="Adicionar cartão",
+        operation_description=(
+            "Salva um novo cartão para o cliente autenticado.\n\n"
+            "Envie o número completo do cartão (13–19 dígitos); "
+            "apenas os últimos 4 dígitos são armazenados mascarados. "
+            "O CVV é armazenado exclusivamente para verificação no pagamento."
+        ),
+        manual_parameters=[_AUTH_HEADER],
+        request_body=CartaoSalvoSerializer,
+        responses={
+            201: CartaoSalvoSerializer,
+            400: openapi.Response("Dados inválidos"),
+            401: openapi.Response("Não autenticado"),
+            403: openapi.Response("Acesso negado — apenas clientes"),
+        },
+    )
+    def post(self, request):
+        """Adiciona um novo cartão ao cliente autenticado."""
+        try:
+            tipo = request.user.perfil.tipo
+        except Exception:
+            tipo = None
+
+        if tipo != "cliente":
+            return Response(
+                {"erro": "Apenas clientes podem adicionar cartões."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = CartaoSalvoSerializer(data=request.data)
+        if serializer.is_valid():
+            # Associa o cartão ao cliente autenticado
+            serializer.save(usuario=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CartaoDetailView(APIView):
+    """
+    Recupera (GET) ou remove (DELETE) um cartão salvo pelo id.
+
+    O cliente só pode acessar seus próprios cartões.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def _get_cartao(self, pk, user):
+        """Auxiliar: busca o cartão pelo pk garantindo que pertence ao usuário."""
+        try:
+            return CartaoSalvo.objects.get(pk=pk, usuario=user)
+        except CartaoSalvo.DoesNotExist:
+            return None
+
+    @swagger_auto_schema(
+        tags=["Cartões"],
+        operation_summary="Detalhar cartão",
+        operation_description="Retorna os dados de um cartão salvo pelo id.",
+        manual_parameters=[_AUTH_HEADER],
+        responses={
+            200: CartaoSalvoSerializer,
+            401: openapi.Response("Não autenticado"),
+            404: openapi.Response("Cartão não encontrado"),
+        },
+    )
+    def get(self, request, pk):
+        """Retorna os dados de um cartão do cliente autenticado."""
+        cartao = self._get_cartao(pk, request.user)
+        if cartao is None:
+            return Response({"erro": "Cartão não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = CartaoSalvoSerializer(cartao)
+        return Response(serializer.data)
+
+    @swagger_auto_schema(
+        tags=["Cartões"],
+        operation_summary="Remover cartão",
+        operation_description="Remove um cartão salvo pelo id. Apenas o dono pode remover.",
+        manual_parameters=[_AUTH_HEADER],
+        responses={
+            204: openapi.Response("Cartão removido com sucesso"),
+            401: openapi.Response("Não autenticado"),
+            404: openapi.Response("Cartão não encontrado"),
+        },
+    )
+    def delete(self, request, pk):
+        """Remove um cartão do cliente autenticado."""
+        cartao = self._get_cartao(pk, request.user)
+        if cartao is None:
+            return Response({"erro": "Cartão não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        cartao.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

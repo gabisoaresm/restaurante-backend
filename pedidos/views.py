@@ -163,7 +163,8 @@ class PedidoListView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        serializer = PedidoSerializer(data=request.data)
+        # Passa o request no contexto para que o serializer possa verificar o cartão
+        serializer = PedidoSerializer(data=request.data, context={"request": request})
         if serializer.is_valid():
             serializer.save(cliente=request.user)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
