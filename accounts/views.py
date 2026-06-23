@@ -7,6 +7,7 @@ Endpoints implementados:
   DELETE /api/accounts/token-auth/      → invalida o token atual, realiza logout (200)
   POST   /api/accounts/troca-senha/     → troca a senha do usuário autenticado e renova o token (200)
   GET    /api/accounts/me/              → retorna dados do usuário autenticado, incluindo tipo do perfil (200)
+  PATCH  /api/accounts/me/              → atualiza first_name, last_name e email do usuário autenticado (200)
   GET    /api/accounts/cartoes/         → lista os cartões do cliente autenticado (200)
   POST   /api/accounts/cartoes/         → adiciona novo cartão ao cliente autenticado (201)
   GET    /api/accounts/cartoes/<id>/    → detalha um cartão do cliente (200)
@@ -366,11 +367,15 @@ class TrocaSenhaView(APIView):
 
 class UsuarioAtualView(APIView):
     """
-    Retorna os dados do usuário autenticado, incluindo o tipo do perfil.
+    Retorna e atualiza os dados do usuário autenticado.
 
-    GET → exige token válido no cabeçalho Authorization.
-          Retorna id, username, email, first_name, last_name e tipo do perfil.
-          Se o usuário não tiver Perfil associado, tipo é retornado como null.
+    GET   → exige token válido no cabeçalho Authorization.
+            Retorna id, username, email, first_name, last_name, tipo e date_joined.
+            Se o usuário não tiver Perfil associado, tipo é retornado como null.
+
+    PATCH → atualiza first_name, last_name e email do usuário autenticado.
+            Valida unicidade do e-mail (excluindo o próprio usuário).
+            Retorna os dados atualizados.
     """
 
     authentication_classes = [TokenAuthentication]
@@ -391,11 +396,12 @@ class UsuarioAtualView(APIView):
                 openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        "id": openapi.Schema(type=openapi.TYPE_INTEGER),
-                        "username": openapi.Schema(type=openapi.TYPE_STRING),
-                        "email": openapi.Schema(type=openapi.TYPE_STRING),
-                        "first_name": openapi.Schema(type=openapi.TYPE_STRING),
-                        "last_name": openapi.Schema(type=openapi.TYPE_STRING),
+                        "id":           openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "username":     openapi.Schema(type=openapi.TYPE_STRING),
+                        "email":        openapi.Schema(type=openapi.TYPE_STRING),
+                        "first_name":   openapi.Schema(type=openapi.TYPE_STRING),
+                        "last_name":    openapi.Schema(type=openapi.TYPE_STRING),
+                        "date_joined":  openapi.Schema(type=openapi.TYPE_STRING, description="Data de cadastro no formato dd/mm/aaaa"),
                         "tipo": openapi.Schema(
                             type=openapi.TYPE_STRING,
                             description="Tipo do perfil: cliente, atendente ou gerente. null se não houver perfil.",
@@ -416,12 +422,81 @@ class UsuarioAtualView(APIView):
 
         return Response(
             {
-                "id": request.user.pk,
-                "username": request.user.username,
-                "email": request.user.email,
-                "first_name": request.user.first_name,
-                "last_name": request.user.last_name,
-                "tipo": tipo,
+                "id":           request.user.pk,
+                "username":     request.user.username,
+                "email":        request.user.email,
+                "first_name":   request.user.first_name,
+                "last_name":    request.user.last_name,
+                "date_joined":  request.user.date_joined.strftime("%d/%m/%Y"),
+                "tipo":         tipo,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @swagger_auto_schema(
+        tags=["Autenticação"],
+        operation_summary="Atualizar perfil",
+        operation_description=(
+            "Atualiza os dados pessoais do usuário autenticado.\n\n"
+            "Campos aceitos: `first_name`, `last_name`, `email`. "
+            "O `email` deve ser único — não pode coincidir com outro usuário."
+        ),
+        manual_parameters=[_AUTH_HEADER],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["first_name", "last_name", "email"],
+            properties={
+                "first_name": openapi.Schema(type=openapi.TYPE_STRING, description="Nome"),
+                "last_name":  openapi.Schema(type=openapi.TYPE_STRING, description="Sobrenome"),
+                "email":      openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_EMAIL, description="E-mail único"),
+            },
+        ),
+        responses={
+            200: openapi.Response("Dados atualizados com sucesso"),
+            400: openapi.Response("Campos inválidos ou e-mail já cadastrado"),
+            401: openapi.Response("Não autenticado — token ausente ou inválido"),
+        },
+    )
+    def patch(self, request):
+        """Atualiza os dados pessoais (first_name, last_name, email) do usuário autenticado."""
+        user = request.user
+
+        first_name = request.data.get("first_name", user.first_name).strip()
+        last_name  = request.data.get("last_name",  user.last_name).strip()
+        email      = request.data.get("email",      user.email).strip().lower()
+
+        if not first_name or not last_name or not email:
+            return Response(
+                {"erro": "Os campos first_name, last_name e email são obrigatórios."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Verifica unicidade do e-mail excluindo o próprio usuário
+        if User.objects.filter(email__iexact=email).exclude(pk=user.pk).exists():
+            return Response(
+                {"erro": "Já existe um usuário cadastrado com este e-mail."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.first_name = first_name
+        user.last_name  = last_name
+        user.email      = email
+        user.save(update_fields=["first_name", "last_name", "email"])
+
+        try:
+            tipo = user.perfil.tipo
+        except Exception:
+            tipo = None
+
+        return Response(
+            {
+                "id":           user.pk,
+                "username":     user.username,
+                "email":        user.email,
+                "first_name":   user.first_name,
+                "last_name":    user.last_name,
+                "date_joined":  user.date_joined.strftime("%d/%m/%Y"),
+                "tipo":         tipo,
             },
             status=status.HTTP_200_OK,
         )

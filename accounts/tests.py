@@ -4,7 +4,8 @@ tests.py — Testes do app accounts.
 Cobre:
   - Registro de usuário
   - Login / logout (token)
-  - Endpoint /me/
+  - Endpoint GET /me/ (dados do usuário autenticado)
+  - Endpoint PATCH /me/ (atualização de perfil)
   - Troca de senha
   - CRUD de CartaoSalvo (lista, cria, detalha, remove)
   - Controle de acesso: apenas clientes gerenciam cartões
@@ -126,20 +127,95 @@ class LoginLogoutTests(APITestCase):
 
 
 class MeTests(APITestCase):
-    """Testa o endpoint /me/ (dados do usuário autenticado)."""
+    """Testa GET e PATCH no endpoint /me/ (dados do usuário autenticado)."""
 
     url = "/api/accounts/me/"
 
+    def setUp(self):
+        self.user, self.token = _criar_usuario("me_user", tipo="gerente")
+
+    # GET ─────────────────────────────────────────────────────────────────────
+
     def test_me_retorna_tipo(self):
         """GET /me/ retorna o tipo do perfil correto."""
-        _, token = _criar_usuario("me_user", tipo="gerente")
-        res = self.client.get(self.url, **_auth(token))
+        res = self.client.get(self.url, **_auth(self.token))
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.data["tipo"], "gerente")
+
+    def test_me_retorna_date_joined(self):
+        """GET /me/ inclui date_joined no formato dd/mm/aaaa."""
+        res = self.client.get(self.url, **_auth(self.token))
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("date_joined", res.data)
+        # Verifica formato dd/mm/aaaa (10 chars, separadores nas posições 2 e 5)
+        dj = res.data["date_joined"]
+        self.assertEqual(len(dj), 10)
+        self.assertEqual(dj[2], "/")
+        self.assertEqual(dj[5], "/")
 
     def test_me_sem_autenticacao(self):
         """GET /me/ sem token retorna 401."""
         res = self.client.get(self.url)
+        self.assertEqual(res.status_code, 401)
+
+    # PATCH ───────────────────────────────────────────────────────────────────
+
+    def test_patch_atualiza_dados(self):
+        """PATCH /me/ com dados válidos atualiza e retorna 200 com os novos valores."""
+        res = self.client.patch(
+            self.url,
+            {"first_name": "Novo", "last_name": "Nome", "email": "novo@exemplo.com"},
+            format="json",
+            **_auth(self.token),
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["first_name"], "Novo")
+        self.assertEqual(res.data["last_name"],  "Nome")
+        self.assertEqual(res.data["email"],       "novo@exemplo.com")
+        # Confirma persistência no banco
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, "Novo")
+        self.assertEqual(self.user.email,       "novo@exemplo.com")
+
+    def test_patch_email_duplicado(self):
+        """PATCH com e-mail já usado por outro usuário retorna 400."""
+        _criar_usuario("outro_user")   # cria com outro@exemplo.com
+        res = self.client.patch(
+            self.url,
+            {"first_name": "X", "last_name": "Y", "email": "outro_user@exemplo.com"},
+            format="json",
+            **_auth(self.token),
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("erro", res.data)
+
+    def test_patch_mesmo_email_permitido(self):
+        """PATCH mantendo o próprio e-mail não deve retornar erro de duplicidade."""
+        res = self.client.patch(
+            self.url,
+            {"first_name": "Test", "last_name": "User", "email": "me_user@exemplo.com"},
+            format="json",
+            **_auth(self.token),
+        )
+        self.assertEqual(res.status_code, 200)
+
+    def test_patch_campos_vazios_retorna_400(self):
+        """PATCH com campos obrigatórios em branco retorna 400."""
+        res = self.client.patch(
+            self.url,
+            {"first_name": "", "last_name": "Nome", "email": "x@exemplo.com"},
+            format="json",
+            **_auth(self.token),
+        )
+        self.assertEqual(res.status_code, 400)
+
+    def test_patch_sem_autenticacao(self):
+        """PATCH /me/ sem token retorna 401."""
+        res = self.client.patch(
+            self.url,
+            {"first_name": "X", "last_name": "Y", "email": "x@exemplo.com"},
+            format="json",
+        )
         self.assertEqual(res.status_code, 401)
 
 
