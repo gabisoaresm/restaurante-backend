@@ -9,6 +9,9 @@ Padrão adotado (conforme slides da disciplina):
 
 Leitura (GET) é pública — qualquer um pode consultar o cardápio sem autenticação.
 Escrita (POST, PUT, DELETE) exige token válido e perfil do tipo 'gerente'.
+
+Itens do cardápio aceitam upload de imagem via multipart/form-data.
+O campo imagem é opcional (null=True, blank=True no model).
 """
 
 from drf_yasg import openapi
@@ -27,6 +30,20 @@ _AUTH_HEADER = openapi.Parameter(
     description="Token de autenticação. Formato: Token <seu_token>",
     type=openapi.TYPE_STRING,
     required=True,
+)
+
+# Schema do corpo multipart para POST/PUT de itens (inclui campo de imagem)
+_ITEM_FORM_SCHEMA = openapi.Schema(
+    type=openapi.TYPE_OBJECT,
+    required=["nome", "descricao", "preco", "categoria"],
+    properties={
+        "nome":      openapi.Schema(type=openapi.TYPE_STRING, description="Nome do item"),
+        "descricao": openapi.Schema(type=openapi.TYPE_STRING, description="Descrição detalhada"),
+        "preco":     openapi.Schema(type=openapi.TYPE_NUMBER, description="Preço em reais"),
+        "categoria": openapi.Schema(type=openapi.TYPE_INTEGER, description="ID da categoria"),
+        "disponivel": openapi.Schema(type=openapi.TYPE_BOOLEAN, description="Disponível para pedido (padrão: true)"),
+        "imagem":    openapi.Schema(type=openapi.TYPE_FILE, description="Foto do item (opcional)"),
+    },
 )
 
 
@@ -196,7 +213,7 @@ class ItemCardapioListView(APIView):
     Lista todos os itens do cardápio (público) ou cria um novo (gerente).
 
     GET  → público; aceita query param ?categoria=<id> para filtrar por categoria.
-    POST → requer token de gerente; cria um novo item; retorna 201.
+    POST → requer token de gerente; aceita multipart/form-data para upload de imagem; retorna 201.
     """
 
     @swagger_auto_schema(
@@ -204,7 +221,8 @@ class ItemCardapioListView(APIView):
         operation_summary="Listar itens do cardápio",
         operation_description=(
             "Retorna todos os itens do cardápio. Acesso público.\n\n"
-            "Use o parâmetro opcional `?categoria=<id>` para filtrar por categoria."
+            "Use o parâmetro opcional `?categoria=<id>` para filtrar por categoria.\n\n"
+            "O campo `imagem` retorna a URL absoluta da foto do item, ou `null` se não houver imagem."
         ),
         manual_parameters=[
             openapi.Parameter(
@@ -221,20 +239,27 @@ class ItemCardapioListView(APIView):
         """
         Retorna todos os itens do cardápio. Acesso público.
         Aceita o parâmetro opcional ?categoria=<id> para filtrar por categoria.
+        O campo imagem retorna URL absoluta (ex: http://localhost:8000/media/cardapio/foto.jpg).
         """
         itens = ItemCardapio.objects.all()
         categoria_id = request.query_params.get("categoria")
         if categoria_id:
             itens = itens.filter(categoria_id=categoria_id)
-        serializer = ItemCardapioSerializer(itens, many=True)
+        # context={'request': request} garante URL absoluta no campo imagem
+        serializer = ItemCardapioSerializer(itens, many=True, context={"request": request})
         return Response(serializer.data)
 
     @swagger_auto_schema(
         tags=["Cardápio — Itens"],
         operation_summary="Criar item do cardápio",
-        operation_description="Cria um novo item no cardápio. Requer token de gerente.",
+        operation_description=(
+            "Cria um novo item no cardápio. Requer token de gerente.\n\n"
+            "Envie os dados como **multipart/form-data** para incluir uma imagem. "
+            "O campo `imagem` é opcional — omita-o para criar o item sem foto."
+        ),
         manual_parameters=[_AUTH_HEADER],
-        request_body=ItemCardapioSerializer,
+        request_body=_ITEM_FORM_SCHEMA,
+        consumes=["multipart/form-data"],
         responses={
             201: ItemCardapioSerializer,
             400: openapi.Response("Dados inválidos"),
@@ -243,11 +268,14 @@ class ItemCardapioListView(APIView):
         },
     )
     def post(self, request):
-        """Cria um novo item do cardápio. Requer autenticação com perfil gerente."""
+        """
+        Cria um novo item do cardápio. Requer autenticação com perfil gerente.
+        Aceita multipart/form-data para que o campo imagem (foto do item) possa ser enviado.
+        """
         erro = _checar_gerente(request)
         if erro:
             return erro
-        serializer = ItemCardapioSerializer(data=request.data)
+        serializer = ItemCardapioSerializer(data=request.data, context={"request": request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -258,8 +286,9 @@ class ItemCardapioDetailView(APIView):
     """
     Recupera (público), atualiza ou remove um item do cardápio (gerente).
 
-    GET    → público; retorna o item com o id informado.
-    PUT    → requer token de gerente; substitui todos os campos do item.
+    GET    → público; retorna o item com o id informado (campo imagem com URL absoluta).
+    PUT    → requer token de gerente; aceita multipart/form-data; se imagem não for enviada,
+             a imagem existente é mantida.
     DELETE → requer token de gerente; remove o item do cardápio.
     """
 
@@ -273,7 +302,10 @@ class ItemCardapioDetailView(APIView):
     @swagger_auto_schema(
         tags=["Cardápio — Itens"],
         operation_summary="Detalhar item do cardápio",
-        operation_description="Retorna os dados de um item do cardápio pelo id. Acesso público.",
+        operation_description=(
+            "Retorna os dados de um item do cardápio pelo id. Acesso público.\n\n"
+            "O campo `imagem` retorna a URL absoluta da foto, ou `null` se não houver imagem."
+        ),
         responses={
             200: ItemCardapioSerializer,
             404: openapi.Response("Item não encontrado"),
@@ -284,15 +316,20 @@ class ItemCardapioDetailView(APIView):
         item = self._get_object(pk)
         if item is None:
             return Response({"erro": "Item não encontrado."}, status=status.HTTP_404_NOT_FOUND)
-        serializer = ItemCardapioSerializer(item)
+        serializer = ItemCardapioSerializer(item, context={"request": request})
         return Response(serializer.data)
 
     @swagger_auto_schema(
         tags=["Cardápio — Itens"],
         operation_summary="Atualizar item do cardápio",
-        operation_description="Substitui todos os campos de um item do cardápio. Requer token de gerente.",
+        operation_description=(
+            "Substitui todos os campos de um item do cardápio. Requer token de gerente.\n\n"
+            "Envie os dados como **multipart/form-data**. "
+            "Se o campo `imagem` não for incluído, a imagem existente é preservada."
+        ),
         manual_parameters=[_AUTH_HEADER],
-        request_body=ItemCardapioSerializer,
+        request_body=_ITEM_FORM_SCHEMA,
+        consumes=["multipart/form-data"],
         responses={
             200: ItemCardapioSerializer,
             400: openapi.Response("Dados inválidos"),
@@ -302,14 +339,17 @@ class ItemCardapioDetailView(APIView):
         },
     )
     def put(self, request, pk):
-        """Atualiza todos os campos de um item do cardápio. Requer autenticação com perfil gerente."""
+        """
+        Atualiza todos os campos de um item do cardápio. Requer autenticação com perfil gerente.
+        Aceita multipart/form-data. Se nenhuma imagem nova for enviada, a existente é mantida.
+        """
         erro = _checar_gerente(request)
         if erro:
             return erro
         item = self._get_object(pk)
         if item is None:
             return Response({"erro": "Item não encontrado."}, status=status.HTTP_404_NOT_FOUND)
-        serializer = ItemCardapioSerializer(item, data=request.data)
+        serializer = ItemCardapioSerializer(item, data=request.data, context={"request": request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)

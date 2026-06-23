@@ -49,6 +49,12 @@ class ItemCardapio(models.Model):
         default=True,
         help_text="Indica se o item está disponível para pedido",
     )
+    imagem = models.ImageField(
+        upload_to="cardapio/",
+        null=True,
+        blank=True,
+        help_text="Foto do item (opcional)",
+    )
 
     class Meta:
         ordering = ["categoria", "nome"]

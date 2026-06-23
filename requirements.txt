@@ -5,3 +5,4 @@ drf-yasg
 django-rest-passwordreset
 python-dotenv
 setuptools
+Pillow

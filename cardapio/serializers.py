@@ -29,4 +29,4 @@ class ItemCardapioSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ItemCardapio
-        fields = ["id", "nome", "descricao", "preco", "categoria", "categoria_nome", "disponivel"]
+        fields = ["id", "nome", "descricao", "preco", "categoria", "categoria_nome", "disponivel", "imagem"]
