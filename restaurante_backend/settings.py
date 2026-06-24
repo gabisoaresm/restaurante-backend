@@ -34,9 +34,16 @@ SECRET_KEY = os.environ.get(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Em desenvolvimento, defina DEBUG=True no .env. Em produção, não defina (padrão False).
+DEBUG = os.environ.get("DEBUG", "False") == "True"
 
-ALLOWED_HOSTS = []
+# Hosts permitidos — em produção inclui o domínio do PythonAnywhere.
+# Lido do .env para facilitar ajuste sem alterar o código.
+_allowed_hosts_env = os.environ.get(
+    "ALLOWED_HOSTS",
+    "cucinaitaliana.pythonanywhere.com,localhost,127.0.0.1",
+)
+ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_env.split(",") if h.strip()]
 
 
 # Application definition
@@ -135,6 +142,10 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "static/"
+
+# Diretório onde o collectstatic reúne todos os arquivos estáticos para produção.
+# Necessário para o Swagger carregar seus CSS/JS após rodar: python manage.py collectstatic
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Arquivos de mídia enviados pelos usuários (ex: fotos dos itens do cardápio)
 MEDIA_URL = "/media/"
