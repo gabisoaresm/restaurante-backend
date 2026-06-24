@@ -42,7 +42,8 @@ _ITEM_FORM_SCHEMA = openapi.Schema(
         "preco":     openapi.Schema(type=openapi.TYPE_NUMBER, description="Preço em reais"),
         "categoria": openapi.Schema(type=openapi.TYPE_INTEGER, description="ID da categoria"),
         "disponivel": openapi.Schema(type=openapi.TYPE_BOOLEAN, description="Disponível para pedido (padrão: true)"),
-        "imagem":    openapi.Schema(type=openapi.TYPE_FILE, description="Foto do item (opcional)"),
+        "imagem":         openapi.Schema(type=openapi.TYPE_FILE,    description="Foto do item (opcional)"),
+        "remover_imagem": openapi.Schema(type=openapi.TYPE_BOOLEAN, description="true para excluir a foto atual (apenas no PUT; ignorado se imagem nova for enviada)"),
     },
 )
 

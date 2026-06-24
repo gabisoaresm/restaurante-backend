@@ -132,7 +132,7 @@ class RegistroView(APIView):
             validate_password(password, user=user_temp)
         except ValidationError as exc:
             return Response(
-                {"erro": " ".join(exc.messages)},
+                {"erros": exc.messages},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
