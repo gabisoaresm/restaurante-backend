@@ -17,6 +17,7 @@ O campo imagem é opcional (null=True, blank=True no model).
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -32,20 +33,16 @@ _AUTH_HEADER = openapi.Parameter(
     required=True,
 )
 
-# Schema do corpo multipart para POST/PUT de itens (inclui campo de imagem)
-_ITEM_FORM_SCHEMA = openapi.Schema(
-    type=openapi.TYPE_OBJECT,
-    required=["nome", "descricao", "preco", "categoria"],
-    properties={
-        "nome":      openapi.Schema(type=openapi.TYPE_STRING, description="Nome do item"),
-        "descricao": openapi.Schema(type=openapi.TYPE_STRING, description="Descrição detalhada"),
-        "preco":     openapi.Schema(type=openapi.TYPE_NUMBER, description="Preço em reais"),
-        "categoria": openapi.Schema(type=openapi.TYPE_INTEGER, description="ID da categoria"),
-        "disponivel": openapi.Schema(type=openapi.TYPE_BOOLEAN, description="Disponível para pedido (padrão: true)"),
-        "imagem":         openapi.Schema(type=openapi.TYPE_FILE,    description="Foto do item (opcional)"),
-        "remover_imagem": openapi.Schema(type=openapi.TYPE_BOOLEAN, description="true para excluir a foto atual (apenas no PUT; ignorado se imagem nova for enviada)"),
-    },
-)
+# Parâmetros de formulário multipart para POST/PUT de itens (IN_FORM obrigatório com multipart)
+_ITEM_FORM_PARAMS = [
+    openapi.Parameter("nome",           openapi.IN_FORM, type=openapi.TYPE_STRING,  required=True,  description="Nome do item"),
+    openapi.Parameter("descricao",      openapi.IN_FORM, type=openapi.TYPE_STRING,  required=True,  description="Descrição detalhada"),
+    openapi.Parameter("preco",          openapi.IN_FORM, type=openapi.TYPE_NUMBER,  required=True,  description="Preço em reais"),
+    openapi.Parameter("categoria",      openapi.IN_FORM, type=openapi.TYPE_INTEGER, required=True,  description="ID da categoria"),
+    openapi.Parameter("disponivel",     openapi.IN_FORM, type=openapi.TYPE_BOOLEAN, required=False, description="Disponível para pedido (padrão: true)"),
+    openapi.Parameter("imagem",         openapi.IN_FORM, type=openapi.TYPE_FILE,    required=False, description="Foto do item (opcional)"),
+    openapi.Parameter("remover_imagem", openapi.IN_FORM, type=openapi.TYPE_BOOLEAN, required=False, description="true para excluir a foto atual (apenas no PUT)"),
+]
 
 
 def _checar_gerente(request):
@@ -217,6 +214,8 @@ class ItemCardapioListView(APIView):
     POST → requer token de gerente; aceita multipart/form-data para upload de imagem; retorna 201.
     """
 
+    parser_classes = [MultiPartParser, FormParser]
+
     @swagger_auto_schema(
         tags=["Cardápio — Itens"],
         operation_summary="Listar itens do cardápio",
@@ -258,9 +257,7 @@ class ItemCardapioListView(APIView):
             "Envie os dados como **multipart/form-data** para incluir uma imagem. "
             "O campo `imagem` é opcional — omita-o para criar o item sem foto."
         ),
-        manual_parameters=[_AUTH_HEADER],
-        request_body=_ITEM_FORM_SCHEMA,
-        consumes=["multipart/form-data"],
+        manual_parameters=[_AUTH_HEADER] + _ITEM_FORM_PARAMS,
         responses={
             201: ItemCardapioSerializer,
             400: openapi.Response("Dados inválidos"),
@@ -292,6 +289,8 @@ class ItemCardapioDetailView(APIView):
              a imagem existente é mantida.
     DELETE → requer token de gerente; remove o item do cardápio.
     """
+
+    parser_classes = [MultiPartParser, FormParser]
 
     def _get_object(self, pk):
         """Auxiliar: busca o item pelo pk ou retorna None."""
@@ -328,9 +327,7 @@ class ItemCardapioDetailView(APIView):
             "Envie os dados como **multipart/form-data**. "
             "Se o campo `imagem` não for incluído, a imagem existente é preservada."
         ),
-        manual_parameters=[_AUTH_HEADER],
-        request_body=_ITEM_FORM_SCHEMA,
-        consumes=["multipart/form-data"],
+        manual_parameters=[_AUTH_HEADER] + _ITEM_FORM_PARAMS,
         responses={
             200: ItemCardapioSerializer,
             400: openapi.Response("Dados inválidos"),
