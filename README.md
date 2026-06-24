@@ -104,11 +104,17 @@ A documentação completa e interativa está disponível em `/swagger/` e `/redo
 
 ## Imagens
 
+**Visão geral da documentação Swagger — todos os grupos de endpoints da API:**
+
 ![Swagger UI — listagem de endpoints](docs/screenshots/swagger.png)
 
-![Exemplo de resposta — GET /api/cardapio/itens/](docs/screenshots/cardapio-itens.png)
+**Endpoint `POST /api/cardapio/itens/` expandido — parâmetros de formulário para criação de item com upload de imagem:**
 
-![Exemplo de resposta — GET /api/pedidos/](docs/screenshots/pedidos.png)
+![Endpoint de criação de item do cardápio](docs/screenshots/cardapio-itens.png)
+
+**Endpoint `GET /api/pedidos/` expandido — filtros disponíveis e exemplo de resposta:**
+
+![Endpoint de listagem de pedidos](docs/screenshots/pedidos.png)
 
 ---
 
