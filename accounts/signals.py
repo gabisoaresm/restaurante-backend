@@ -36,7 +36,7 @@ def enviar_email_redefinicao_senha(sender, instance, reset_password_token, *args
     corpo_html = render_to_string("accounts/email/password_reset_email.html", contexto)
 
     email = EmailMultiAlternatives(
-        subject="Redefinição de Senha — Restaurante",
+        subject="Redefinição de Senha — Cucina Italiana",
         body=corpo_texto,
         to=[reset_password_token.user.email],
     )
