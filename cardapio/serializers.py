@@ -41,6 +41,11 @@ class ItemCardapioSerializer(serializers.ModelSerializer):
             "remover_imagem",
         ]
 
+    def create(self, validated_data):
+        """Remove remover_imagem (campo write-only exclusivo do PUT) antes de criar."""
+        validated_data.pop("remover_imagem", False)
+        return super().create(validated_data)
+
     def update(self, instance, validated_data):
         """
         Sobrescreve update para suportar exclusão da imagem existente.
