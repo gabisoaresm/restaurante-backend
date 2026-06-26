@@ -199,7 +199,7 @@ Acesse a documentação Swagger em: [http://127.0.0.1:8000/swagger/](http://127.
 O endpoint público `/api/accounts/registro/` cria sempre um perfil de **Cliente**. Para criar um Gerente:
 
 **Via Django Admin:**
-1. Acesse [http://127.0.0.1:8000/admin/](http://127.0.0.1:8000/admin/) com o superusuário
+1. Acesse /admin/ com o superusuário
 2. Crie um usuário em *Users*
 3. Em *Perfils*, altere o tipo para `gerente`
 
@@ -284,6 +284,4 @@ O endpoint público `/api/accounts/registro/` cria sempre um perfil de **Cliente
 
 ## Link do Site Publicado
 
-[Adicionar URL do Site publicado]
-
-Documentação Swagger: [Adicionar URL da documentação Swagger]
+Documentação Swagger: [https://cucinaitaliana.pythonanywhere.com/swagger/](https://cucinaitaliana.pythonanywhere.com/swagger/)
