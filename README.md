@@ -284,4 +284,4 @@ O endpoint público `/api/accounts/registro/` cria sempre um perfil de **Cliente
 
 ## Link do Site Publicado
 
-Documentação Swagger: [https://cucinaitaliana.pythonanywhere.com/swagger/](https://cucinaitaliana.pythonanywhere.com/swagger/)
+[https://cucinaitaliana.pythonanywhere.com/swagger/](https://cucinaitaliana.pythonanywhere.com/swagger/)
